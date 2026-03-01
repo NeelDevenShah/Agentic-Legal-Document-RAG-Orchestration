@@ -1,0 +1,5 @@
+.env
+*.pdf
+*.pyc
+.venv
+*.egg-info
