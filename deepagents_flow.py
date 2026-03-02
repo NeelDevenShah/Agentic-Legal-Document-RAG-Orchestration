@@ -4,13 +4,12 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from deepagents import create_deep_agent
 
-from .prompts import (
+from prompts import (
     DEEPAGENTS_SYSTEM_PROMPT,
     RESEARCH_SUBAGENT_PROMPT,
     SYNTHESIS_SUBAGENT_PROMPT,
 )
-from .retrieval import CorpusIndex, format_search_hits
-from .utils import extract_final_ai_text, retry_with_backoff
+from utilities import CorpusIndex, extract_final_ai_text, format_search_hits, retry_with_backoff
 
 
 def build_search_tool(index: CorpusIndex):

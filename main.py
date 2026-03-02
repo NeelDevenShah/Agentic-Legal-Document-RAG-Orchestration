@@ -3,13 +3,16 @@ from __future__ import annotations
 import gradio as gr
 from dotenv import load_dotenv
 
-from .chunking import chunk_documents
-from .data import load_pdf_documents
-from .deepagents_flow import run_deepagents_rag
-from .graph_flow import run_langgraph_rag
-from .llm import ModelConfig, build_chat_model
-from .retrieval import build_corpus_index
-from .config import AppConfig
+from config import AppConfig
+from deepagents_flow import run_deepagents_rag
+from graph_flow import run_langgraph_rag
+from utilities import (
+    ModelConfig,
+    build_chat_model,
+    build_corpus_index,
+    chunk_documents,
+    load_pdf_documents,
+)
 
 
 def _build_runtime(config: AppConfig):
@@ -43,6 +46,10 @@ def _require_api_key(provider: str) -> None:
     if provider == "gemini" and not os.getenv("GOOGLE_API_KEY"):
         raise RuntimeError(
             "GOOGLE_API_KEY is not set. Add it to .env to run the Gemini-backed demo."
+        )
+    if provider == "openrouter" and not (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_KEY")):
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is not set. Add it to .env to run the OpenRouter-backed demo."
         )
 
 

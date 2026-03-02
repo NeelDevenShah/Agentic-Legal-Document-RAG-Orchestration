@@ -1,8 +1,8 @@
 from .chunking import chunk_documents
-from .config import AppConfig
 from .data import load_pdf_documents
 from .llm import ModelConfig, build_chat_model
-from .prompts import (
+from config import AppConfig
+from prompts import (
     DEEPAGENTS_SYSTEM_PROMPT,
     LANGGRAPH_SYSTEM_PROMPT,
     RESEARCH_SUBAGENT_PROMPT,

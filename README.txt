@@ -36,13 +36,13 @@ flowchart LR
 
 ## Approach
 
-The corpus is loaded page by page, normalized, and split with a recursive splitter that prefers paragraph boundaries before falling back to sentence and character boundaries. Retrieval is handled by a local TF-IDF index so the demo stays deterministic and does not require a vector database. The LLM layer can be backed by Groq or Gemini through LangChain integrations, and the code retries transient rate-limit style failures with exponential backoff.
+The corpus is loaded page by page, normalized, and split with a recursive splitter that prefers paragraph boundaries before falling back to sentence and character boundaries. Retrieval is handled by a local TF-IDF index so the demo stays deterministic and does not require a vector database. The LLM layer can be backed by Groq, Gemini, or OpenRouter through LangChain integrations, and the code retries transient rate-limit style failures with exponential backoff.
 
 The LangGraph path is the simplest grounded RAG pipeline: retrieve the best chunks, then answer only from that context. The DeepAgents path exposes the same corpus through a tool, then delegates retrieval and synthesis to dedicated subagents.
 
 ## Run locally
 
-1. Copy `.env.sample` to `.env` and set either `GROQ_API_KEY` or `GOOGLE_API_KEY`.
+1. Copy `.env.sample` to `.env` and set the active provider key, including `OPENROUTER_API_KEY` if you want the OpenRouter route.
 2. Install dependencies with `pip install -r requirements.txt`.
 3. Run the demo:
 
