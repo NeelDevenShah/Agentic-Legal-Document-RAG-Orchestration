@@ -1,5 +1,5 @@
 from .chunking import chunk_documents
-from .data import load_pdf_documents
+from .data import load_pdf_documents, load_pdf_documents_from_paths
 from .llm import ModelConfig, build_chat_model
 from config import AppConfig
 from prompts import (
@@ -26,6 +26,7 @@ __all__ = [
     "extract_final_ai_text",
     "format_search_hits",
     "load_pdf_documents",
+    "load_pdf_documents_from_paths",
     "message_content_to_text",
     "normalize_whitespace",
     "retry_with_backoff",

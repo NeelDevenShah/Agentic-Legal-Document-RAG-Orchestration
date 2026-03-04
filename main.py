@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import gradio as gr
 from dotenv import load_dotenv
 
@@ -12,18 +14,37 @@ from utilities import (
     build_corpus_index,
     chunk_documents,
     load_pdf_documents,
+    load_pdf_documents_from_paths,
 )
 
 
-def _build_runtime(config: AppConfig):
-    documents = load_pdf_documents(config.data_dir)
+def _uploaded_pdf_paths(uploaded_files) -> list[Path]:
+    paths: list[Path] = []
+    for uploaded_file in uploaded_files or []:
+        path = getattr(uploaded_file, "path", None) or getattr(uploaded_file, "name", None) or uploaded_file
+        paths.append(Path(path))
+    return paths
+
+
+def _build_runtime(config: AppConfig, *, metadata_llm, uploaded_files=None):
+    if uploaded_files:
+        documents = load_pdf_documents_from_paths(_uploaded_pdf_paths(uploaded_files))
+        source_label = "uploaded PDFs"
+    else:
+        documents = load_pdf_documents(config.data_dir)
+        source_label = str(config.data_dir)
+
     chunks = chunk_documents(
         documents,
         chunk_size=config.chunk_size,
         chunk_overlap=config.chunk_overlap,
     )
-    index = build_corpus_index(chunks)
-    return index, chunks
+    index = build_corpus_index(
+        chunks,
+        embedding_model_name=config.embedding_model_name,
+        metadata_llm=metadata_llm,
+    )
+    return index, chunks, source_label
 
 
 def _build_model(config: AppConfig):
@@ -58,12 +79,17 @@ def _build_answers(
     question: str,
     flow: str,
     config: AppConfig,
+    uploaded_files=None,
 ):
     _require_api_key(config.provider)
-    index, chunks = _build_runtime(config)
     model = _build_model(config)
+    index, chunks, source_label = _build_runtime(
+        config,
+        metadata_llm=model,
+        uploaded_files=uploaded_files,
+    )
 
-    outputs: list[str] = [f"Loaded {len(chunks)} chunks from {config.data_dir}"]
+    outputs: list[str] = [f"Loaded {len(chunks)} chunks from {source_label}"]
 
     if flow in {"langgraph", "both"}:
         langgraph_answer = run_langgraph_rag(
@@ -94,7 +120,12 @@ def build_demo() -> gr.Blocks:
     base_config = AppConfig.from_env()
 
     with gr.Blocks(title="Virallens Multi-Agent RAG") as demo:
-        gr.Markdown("# Virallens Multi-Agent RAG\nQuery the PDFs in `data/` with LangGraph or DeepAgents.")
+        gr.Markdown("# Virallens Multi-Agent RAG\nQuery PDFs from `data/` or upload your own documents, then run LangGraph or DeepAgents.")
+        uploaded_files = gr.File(
+            label="Upload PDFs (optional)",
+            file_count="multiple",
+            file_types=[".pdf"],
+        )
         with gr.Row():
             question = gr.Textbox(
                 label="Question",
@@ -111,12 +142,17 @@ def build_demo() -> gr.Blocks:
         output = gr.Textbox(label="Answer", lines=24)
         run_button = gr.Button("Run")
 
-        def run(question_text, selected_flow):
-            return _build_answers(question=question_text, flow=selected_flow, config=base_config)
+        def run(question_text, selected_flow, uploaded_files_value):
+            return _build_answers(
+                question=question_text,
+                flow=selected_flow,
+                config=base_config,
+                uploaded_files=uploaded_files_value,
+            )
 
         run_button.click(
             run,
-            inputs=[question, flow],
+            inputs=[question, flow, uploaded_files],
             outputs=output,
         )
 
