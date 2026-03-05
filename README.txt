@@ -6,7 +6,7 @@ This repository implements the Q1 assignment as a small multi-agent RAG demo ove
 
 - A page-aware PDF ingestion pipeline.
 - Recursive chunking with overlap for legal-style documents.
-- A shared retrieval index built with `TF-IDF` and cosine similarity.
+- A shared retrieval index built with Qdrant, semantic embeddings, BM25, and reciprocal rank fusion.
 - A LangGraph flow for direct grounded question answering.
 - A DeepAgents flow with a research subagent and a synthesis subagent.
 - A Gradio web interface.
@@ -25,7 +25,7 @@ This repository implements the Q1 assignment as a small multi-agent RAG demo ove
 flowchart LR
   Q[User question] --> L[Load PDFs]
   L --> C[Chunk pages]
-  C --> I[Build TF-IDF index]
+  C --> I[Build Qdrant hybrid index]
   I --> G1[LangGraph retrieve]
   G1 --> A1[LangGraph answer]
   I --> D1[DeepAgents orchestrator]
@@ -40,6 +40,8 @@ The corpus is loaded page by page, normalized, and split with a recursive splitt
 
 The Gradio UI also accepts optional PDF uploads. When files are uploaded, the app chunks and indexes those documents instead of the default `data/` folder.
 
+Qdrant connection details, the embedding model, and the optional MySQL persistence settings are all read from `.env` / `.env.sample` so you can switch environments without changing code.
+
 The LangGraph path is the simplest grounded RAG pipeline: retrieve the best chunks, then answer only from that context. The DeepAgents path exposes the same corpus through a tool, then delegates retrieval and synthesis to dedicated subagents.
 
 ## Run locally
@@ -49,14 +51,22 @@ The LangGraph path is the simplest grounded RAG pipeline: retrieve the best chun
 3. Run the demo:
 
 ```bash
-python -m app.main
+python main.py
 ```
 
 This opens the Gradio app with the question box and flow selector. All runtime settings come from `.env`.
 
+## Docker
+
+1. Copy `.env.sample` to `.env` and fill in the provider keys you want to use.
+2. Start the stack with `docker compose up --build`.
+3. Open the app at `http://localhost:7860`.
+
+The compose stack brings up the app, Qdrant, and MySQL, and creates the MySQL tables used for message, session, and memory storage.
+
 ## Notes
 
 - The UI is intentionally simple and Gradio-based.
-- All runtime settings are loaded from `.env` through `app/config.py`.
-- The `app/main.py` entrypoint launches the Gradio app and serves as the sample main file requested in the brief.
-- Writing code under `app/` is a standard small-project layout; `src/` is also common, but `app/` keeps the launch path obvious here.
+- All runtime settings are loaded from `.env` through `config.py` and the `utilities/` package.
+- The `main.py` entrypoint launches the Gradio app and serves as the sample main file requested in the brief.
+- The repository keeps reusable logic under `utilities/` so the launch path stays simple here.

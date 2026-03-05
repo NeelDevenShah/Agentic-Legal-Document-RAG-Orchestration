@@ -1,0 +1,31 @@
+CREATE DATABASE IF NOT EXISTS virallens;
+USE virallens;
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id VARCHAR(128) PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    metadata JSON NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(128) NOT NULL,
+    role VARCHAR(32) NOT NULL,
+    content LONGTEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_messages_session_id (session_id),
+    CONSTRAINT fk_messages_session
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS memory_entries (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(128) NULL,
+    memory_key VARCHAR(255) NOT NULL,
+    memory_value LONGTEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_memory_session_id (session_id)
+);

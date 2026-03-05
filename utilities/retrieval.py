@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
@@ -81,7 +82,7 @@ class CorpusIndex:
     chunks: list[Document]
     chunk_ids: list[str]
     chunk_id_to_index: dict[str, int]
-    embeddings: OpenAIEmbeddings
+    embeddings: Embeddings
     qdrant_client: QdrantClient
     collection_name: str
     bm25_index: BM25Index
@@ -273,32 +274,140 @@ def _build_bm25_index(texts: list[str]) -> BM25Index:
     )
 
 
+def _chunk_sort_key(document: Document) -> tuple[str, int]:
+    metadata = document.metadata
+    source = str(metadata.get("path") or metadata.get("source") or "")
+    chunk_index = metadata.get("chunk_index")
+    try:
+        chunk_number = int(chunk_index)
+    except (TypeError, ValueError):
+        chunk_number = 0
+    return source, chunk_number
+
+
+def create_qdrant_client(
+    *,
+    qdrant_path: str | Path = ".qdrant",
+    qdrant_url: str | None = None,
+    qdrant_api_key: str | None = None,
+) -> QdrantClient:
+    if qdrant_url:
+        return QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+    return QdrantClient(path=str(Path(qdrant_path).expanduser()))
+
+
+def _create_embeddings(embedding_model_name: str | None = None) -> Embeddings:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is not set. Add it to .env to build the embedding index."
+        )
+
+    return OpenAIEmbeddings(
+        model=(embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-3-small")).strip(),
+        api_key=api_key,
+    )
+
+
+def clear_qdrant_collection(
+    *,
+    qdrant_path: str | Path = ".qdrant",
+    qdrant_url: str | None = None,
+    qdrant_api_key: str | None = None,
+    collection_name: str = "virallens_corpus",
+    embedding_model_name: str | None = None,
+) -> str:
+    qdrant_client = create_qdrant_client(
+        qdrant_path=qdrant_path,
+        qdrant_url=qdrant_url,
+        qdrant_api_key=qdrant_api_key,
+    )
+    if qdrant_client.collection_exists(collection_name):
+        qdrant_client.delete_collection(collection_name)
+        return f"Qdrant: deleted collection `{collection_name}`."
+    return f"Qdrant: no collection named `{collection_name}`."
+
+
+def load_corpus_index_from_qdrant(
+    *,
+    embedding_model_name: str | None = None,
+    qdrant_path: str | Path = ".qdrant",
+    qdrant_url: str | None = None,
+    qdrant_api_key: str | None = None,
+    collection_name: str = "virallens_corpus",
+) -> CorpusIndex:
+    qdrant_client = create_qdrant_client(
+        qdrant_path=qdrant_path,
+        qdrant_url=qdrant_url,
+        qdrant_api_key=qdrant_api_key,
+    )
+    if not qdrant_client.collection_exists(collection_name):
+        raise RuntimeError("No indexed corpus found. Upload PDFs if needed, then click Index new files.")
+
+    enriched_chunks: list[Document] = []
+    chunk_ids: list[str] = []
+    next_offset = None
+    while True:
+        records, next_offset = qdrant_client.scroll(
+            collection_name=collection_name,
+            limit=256,
+            offset=next_offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not records:
+            break
+        for record in records:
+            payload = dict(record.payload or {})
+            page_content = str(payload.pop("page_content", ""))
+            metadata = dict(payload)
+            if "chunk_id" not in metadata:
+                metadata["chunk_id"] = str(record.id)
+            enriched_chunks.append(Document(page_content=page_content, metadata=metadata))
+            chunk_ids.append(str(metadata["chunk_id"]))
+        if next_offset is None:
+            break
+
+    if not enriched_chunks:
+        raise RuntimeError("The Qdrant collection is empty. Click Index new files to build the index.")
+
+    paired = sorted(zip(chunk_ids, enriched_chunks, strict=False), key=lambda item: _chunk_sort_key(item[1]))
+    chunk_ids = [chunk_id for chunk_id, _ in paired]
+    enriched_chunks = [chunk for _, chunk in paired]
+
+    search_texts = [
+        str(chunk.metadata.get("search_text") or chunk.page_content)
+        for chunk in enriched_chunks
+    ]
+    embeddings = _create_embeddings(embedding_model_name)
+    bm25_index = _build_bm25_index(search_texts)
+    chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
+
+    return CorpusIndex(
+        chunks=enriched_chunks,
+        chunk_ids=chunk_ids,
+        chunk_id_to_index=chunk_id_to_index,
+        embeddings=embeddings,
+        qdrant_client=qdrant_client,
+        collection_name=collection_name,
+        bm25_index=bm25_index,
+    )
+
+
 def build_corpus_index(
     chunks: list[Document],
     *,
     embedding_model_name: str | None = None,
     metadata_llm: Any | None = None,
     qdrant_path: str | Path = ".qdrant",
+    qdrant_url: str | None = None,
+    qdrant_api_key: str | None = None,
     collection_name: str = "virallens_corpus",
 ) -> CorpusIndex:
     if not chunks:
         raise ValueError("Cannot build an index from an empty chunk list")
 
-    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY is not set. Add it to .env to build the embedding index."
-        )
-
-    embeddings = OpenAIEmbeddings(
-        model=(embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "nvidia/nemotron-3-embed-1b:free")).strip(),
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-        default_headers={
-            "HTTP-Referer": "http://localhost",
-            "X-Title": "Virallens Multi-Agent RAG",
-        },
-    )
+    embeddings = _create_embeddings(embedding_model_name)
 
     grouped_chunks = _group_chunks_by_source(chunks)
     source_profiles = {
@@ -324,7 +433,11 @@ def build_corpus_index(
         chunk_ids.append(metadata["chunk_id"])
         search_texts.append(metadata["search_text"])
 
-    qdrant_client = QdrantClient(path=str(Path(qdrant_path).expanduser()))
+    qdrant_client = create_qdrant_client(
+        qdrant_path=qdrant_path,
+        qdrant_url=qdrant_url,
+        qdrant_api_key=qdrant_api_key,
+    )
     if qdrant_client.collection_exists(collection_name):
         qdrant_client.delete_collection(collection_name)
 

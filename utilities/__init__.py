@@ -8,7 +8,14 @@ from prompts import (
     RESEARCH_SUBAGENT_PROMPT,
     SYNTHESIS_SUBAGENT_PROMPT,
 )
-from .retrieval import CorpusIndex, SearchHit, build_corpus_index, format_search_hits
+from .retrieval import (
+    CorpusIndex,
+    SearchHit,
+    build_corpus_index,
+    clear_qdrant_collection,
+    format_search_hits,
+    load_corpus_index_from_qdrant,
+)
 from .utils import extract_final_ai_text, message_content_to_text, normalize_whitespace, retry_with_backoff
 
 __all__ = [
@@ -22,11 +29,13 @@ __all__ = [
     "SYNTHESIS_SUBAGENT_PROMPT",
     "build_chat_model",
     "build_corpus_index",
+    "clear_qdrant_collection",
     "chunk_documents",
     "extract_final_ai_text",
     "format_search_hits",
     "load_pdf_documents",
     "load_pdf_documents_from_paths",
+    "load_corpus_index_from_qdrant",
     "message_content_to_text",
     "normalize_whitespace",
     "retry_with_backoff",
