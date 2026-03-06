@@ -68,6 +68,9 @@ def _build_runtime(config: AppConfig, *, metadata_llm, uploaded_files=None):
     index = build_corpus_index(
         chunks,
         metadata_llm=metadata_llm,
+        retry_attempts=config.retry_attempts,
+        embedding_batch_size=config.embedding_batch_size,
+        embedding_max_concurrency=config.embedding_max_concurrency,
         **_qdrant_settings(config),
     )
     return index, chunks, source_label
@@ -112,7 +115,10 @@ def _resolve_index(config: AppConfig):
     if _RUNTIME.index is not None:
         return _RUNTIME.index, _RUNTIME.chunk_count, _RUNTIME.source_label or "memory cache"
 
-    index = load_corpus_index_from_qdrant(**_qdrant_settings(config))
+    index = load_corpus_index_from_qdrant(
+        retry_attempts=config.retry_attempts,
+        **_qdrant_settings(config),
+    )
     _RUNTIME.index = index
     _RUNTIME.chunk_count = len(index.chunks)
     _RUNTIME.source_label = "stored Qdrant index"

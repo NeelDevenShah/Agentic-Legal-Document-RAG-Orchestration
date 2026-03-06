@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,7 @@ from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
-from .utils import message_content_to_text, normalize_whitespace
+from .utils import message_content_to_text, normalize_whitespace, retry_with_backoff
 
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
@@ -86,6 +88,8 @@ class CorpusIndex:
     qdrant_client: QdrantClient
     collection_name: str
     bm25_index: BM25Index
+    retry_attempts: int = 4
+    numeric_id_to_index: dict[int, int] = field(default_factory=dict)
 
     def search(self, query: str, *, top_k: int = 5) -> list[SearchHit]:
         semantic_ranked = self._semantic_ranked_indices(query, limit=max(top_k * 5, 10))
@@ -102,17 +106,21 @@ class CorpusIndex:
         ]
 
     def _semantic_ranked_indices(self, query: str, *, limit: int) -> list[int]:
-        query_vector = self.embeddings.embed_query(query)
-        results = self.qdrant_client.search(
+        query_vector = retry_with_backoff(
+            lambda: self.embeddings.embed_query(query),
+            attempts=self.retry_attempts,
+            label="OpenAI embeddings query",
+        )
+        results = self.qdrant_client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             with_payload=False,
-        )
+        ).points
 
         ranked_indices: list[int] = []
         for result in results:
-            index = self.chunk_id_to_index.get(str(result.id))
+            index = self.numeric_id_to_index.get(result.id)
             if index is not None:
                 ranked_indices.append(index)
         return ranked_indices
@@ -183,7 +191,13 @@ def _fallback_document_metadata(source: str, text: str) -> dict[str, Any]:
     }
 
 
-def _generate_document_metadata(metadata_llm: Any, source: str, text: str) -> dict[str, Any]:
+def _generate_document_metadata(
+    metadata_llm: Any,
+    source: str,
+    text: str,
+    *,
+    retry_attempts: int = 4,
+) -> dict[str, Any]:
     if metadata_llm is None:
         return _fallback_document_metadata(source, text)
 
@@ -200,7 +214,11 @@ def _generate_document_metadata(metadata_llm: Any, source: str, text: str) -> di
     ]
 
     try:
-        response = metadata_llm.invoke(messages)
+        response = retry_with_backoff(
+            lambda: metadata_llm.invoke(messages),
+            attempts=retry_attempts,
+            label=f"metadata LLM ({source})",
+        )
         payload = _parse_metadata_payload(message_content_to_text(getattr(response, "content", response)))
     except Exception:
         return _fallback_document_metadata(source, text)
@@ -240,6 +258,12 @@ def _safe_chunk_id(metadata: dict[str, Any]) -> str:
     chunk_index = str(metadata.get("chunk_index") or metadata.get("chunk_label") or "0")
     source = re.sub(r"[^A-Za-z0-9_.-]+", "_", source).strip("_") or "chunk"
     return f"{source}__{chunk_index}"
+
+
+def _chunk_id_to_numeric(chunk_id: str) -> int:
+    """Convert string chunk ID to a numeric ID (u64) using MD5 hash."""
+    digest = hashlib.md5(chunk_id.encode()).digest()[:8]
+    return int.from_bytes(digest, byteorder="big", signed=False)
 
 
 def _group_chunks_by_source(chunks: list[Document]) -> dict[str, list[Document]]:
@@ -309,6 +333,44 @@ def _create_embeddings(embedding_model_name: str | None = None) -> Embeddings:
     )
 
 
+def _embed_documents_concurrently(
+    embeddings: Embeddings,
+    texts: list[str],
+    *,
+    batch_size: int,
+    max_concurrency: int,
+    retry_attempts: int,
+) -> list[list[float]]:
+    """Embed ``texts`` in batches sent concurrently, each batch retried with backoff.
+
+    Results are reassembled in the original order regardless of completion order.
+    """
+
+    batch_size = max(1, batch_size)
+    max_concurrency = max(1, max_concurrency)
+
+    batches = [texts[start : start + batch_size] for start in range(0, len(texts), batch_size)]
+    results: list[list[list[float]] | None] = [None] * len(batches)
+
+    def embed_batch(batch: list[str]) -> list[list[float]]:
+        return embeddings.embed_documents(batch)
+
+    with ThreadPoolExecutor(max_workers=min(max_concurrency, len(batches))) as executor:
+        future_to_index = {
+            executor.submit(
+                retry_with_backoff,
+                lambda batch=batch: embed_batch(batch),
+                attempts=retry_attempts,
+                label=f"OpenAI embeddings batch {index + 1}/{len(batches)}",
+            ): index
+            for index, batch in enumerate(batches)
+        }
+        for future in as_completed(future_to_index):
+            results[future_to_index[future]] = future.result()
+
+    return [vector for batch_result in results if batch_result is not None for vector in batch_result]
+
+
 def clear_qdrant_collection(
     *,
     qdrant_path: str | Path = ".qdrant",
@@ -335,6 +397,7 @@ def load_corpus_index_from_qdrant(
     qdrant_url: str | None = None,
     qdrant_api_key: str | None = None,
     collection_name: str = "virallens_corpus",
+    retry_attempts: int = 4,
 ) -> CorpusIndex:
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
@@ -346,6 +409,7 @@ def load_corpus_index_from_qdrant(
 
     enriched_chunks: list[Document] = []
     chunk_ids: list[str] = []
+    numeric_ids: list[int] = []
     next_offset = None
     while True:
         records, next_offset = qdrant_client.scroll(
@@ -365,15 +429,20 @@ def load_corpus_index_from_qdrant(
                 metadata["chunk_id"] = str(record.id)
             enriched_chunks.append(Document(page_content=page_content, metadata=metadata))
             chunk_ids.append(str(metadata["chunk_id"]))
+            numeric_ids.append(record.id)
         if next_offset is None:
             break
 
     if not enriched_chunks:
         raise RuntimeError("The Qdrant collection is empty. Click Index new files to build the index.")
 
-    paired = sorted(zip(chunk_ids, enriched_chunks, strict=False), key=lambda item: _chunk_sort_key(item[1]))
-    chunk_ids = [chunk_id for chunk_id, _ in paired]
-    enriched_chunks = [chunk for _, chunk in paired]
+    paired = sorted(
+        zip(chunk_ids, enriched_chunks, numeric_ids, strict=False),
+        key=lambda item: _chunk_sort_key(item[1]),
+    )
+    chunk_ids = [chunk_id for chunk_id, _, _ in paired]
+    enriched_chunks = [chunk for _, chunk, _ in paired]
+    numeric_ids = [numeric_id for _, _, numeric_id in paired]
 
     search_texts = [
         str(chunk.metadata.get("search_text") or chunk.page_content)
@@ -382,6 +451,7 @@ def load_corpus_index_from_qdrant(
     embeddings = _create_embeddings(embedding_model_name)
     bm25_index = _build_bm25_index(search_texts)
     chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
+    numeric_id_to_index = {numeric_id: index for index, numeric_id in enumerate(numeric_ids)}
 
     return CorpusIndex(
         chunks=enriched_chunks,
@@ -391,6 +461,8 @@ def load_corpus_index_from_qdrant(
         qdrant_client=qdrant_client,
         collection_name=collection_name,
         bm25_index=bm25_index,
+        retry_attempts=retry_attempts,
+        numeric_id_to_index=numeric_id_to_index,
     )
 
 
@@ -403,6 +475,9 @@ def build_corpus_index(
     qdrant_url: str | None = None,
     qdrant_api_key: str | None = None,
     collection_name: str = "virallens_corpus",
+    retry_attempts: int = 4,
+    embedding_batch_size: int = 64,
+    embedding_max_concurrency: int = 4,
 ) -> CorpusIndex:
     if not chunks:
         raise ValueError("Cannot build an index from an empty chunk list")
@@ -411,7 +486,12 @@ def build_corpus_index(
 
     grouped_chunks = _group_chunks_by_source(chunks)
     source_profiles = {
-        source: _generate_document_metadata(metadata_llm, source, "\n\n".join(chunk.page_content for chunk in source_chunks))
+        source: _generate_document_metadata(
+            metadata_llm,
+            source,
+            "\n\n".join(chunk.page_content for chunk in source_chunks),
+            retry_attempts=retry_attempts,
+        )
         for source, source_chunks in grouped_chunks.items()
     }
 
@@ -442,7 +522,13 @@ def build_corpus_index(
         qdrant_client.delete_collection(collection_name)
 
     embeddings_matrix = np.asarray(
-        embeddings.embed_documents(search_texts),
+        _embed_documents_concurrently(
+            embeddings,
+            search_texts,
+            batch_size=embedding_batch_size,
+            max_concurrency=embedding_max_concurrency,
+            retry_attempts=retry_attempts,
+        ),
         dtype=np.float32,
     )
     qdrant_client.create_collection(
@@ -453,11 +539,12 @@ def build_corpus_index(
         collection_name=collection_name,
         points=[
             PointStruct(
-                id=chunk_ids[index],
+                id=_chunk_id_to_numeric(chunk_ids[index]),
                 vector=embeddings_matrix[index].tolist(),
                 payload={
                     **enriched_chunks[index].metadata,
                     "page_content": enriched_chunks[index].page_content,
+                    "chunk_id": chunk_ids[index],
                 },
             )
             for index in range(len(enriched_chunks))
@@ -466,6 +553,7 @@ def build_corpus_index(
 
     bm25_index = _build_bm25_index(search_texts)
     chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
+    numeric_id_to_index = {_chunk_id_to_numeric(chunk_id): index for index, chunk_id in enumerate(chunk_ids)}
 
     return CorpusIndex(
         chunks=enriched_chunks,
@@ -475,6 +563,8 @@ def build_corpus_index(
         qdrant_client=qdrant_client,
         collection_name=collection_name,
         bm25_index=bm25_index,
+        retry_attempts=retry_attempts,
+        numeric_id_to_index=numeric_id_to_index,
     )
 
 

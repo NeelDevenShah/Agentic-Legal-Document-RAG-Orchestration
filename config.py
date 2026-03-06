@@ -26,6 +26,8 @@ class AppConfig:
     mysql_memory_table: str = "memory_entries"
     temperature: float = 0.0
     retry_attempts: int = 4
+    embedding_batch_size: int = 64
+    embedding_max_concurrency: int = 4
     default_question: str = (
         "Summarize the most important issues, parties, and recurring themes in the provided documents."
     )
@@ -54,6 +56,8 @@ class AppConfig:
             mysql_memory_table=os.getenv("MYSQL_MEMORY_TABLE", "memory_entries").strip(),
             temperature=float(os.getenv("MODEL_TEMPERATURE", "0")),
             retry_attempts=int(os.getenv("RETRY_ATTEMPTS", "4")),
+            embedding_batch_size=max(1, int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))),
+            embedding_max_concurrency=max(1, int(os.getenv("EMBEDDING_MAX_CONCURRENCY", "4"))),
             default_question=os.getenv(
                 "DEFAULT_QUESTION",
                 "Summarize the most important issues, parties, and recurring themes in the provided documents.",
