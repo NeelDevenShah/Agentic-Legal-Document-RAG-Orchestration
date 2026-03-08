@@ -71,6 +71,9 @@ def _build_runtime(config: AppConfig, *, metadata_llm, uploaded_files=None):
         retry_attempts=config.retry_attempts,
         embedding_batch_size=config.embedding_batch_size,
         embedding_max_concurrency=config.embedding_max_concurrency,
+        jina_api_key=config.jina_api_key,
+        jina_reranker_model=config.jina_reranker_model,
+        rerank_candidate_multiplier=config.rerank_candidate_multiplier,
         **_qdrant_settings(config),
     )
     return index, chunks, source_label
@@ -117,6 +120,9 @@ def _resolve_index(config: AppConfig):
 
     index = load_corpus_index_from_qdrant(
         retry_attempts=config.retry_attempts,
+        jina_api_key=config.jina_api_key,
+        jina_reranker_model=config.jina_reranker_model,
+        rerank_candidate_multiplier=config.rerank_candidate_multiplier,
         **_qdrant_settings(config),
     )
     _RUNTIME.index = index

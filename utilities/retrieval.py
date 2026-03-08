@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import requests
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -90,19 +91,57 @@ class CorpusIndex:
     bm25_index: BM25Index
     retry_attempts: int = 4
     numeric_id_to_index: dict[int, int] = field(default_factory=dict)
+    jina_api_key: str | None = None
+    jina_reranker_model: str = "jina-reranker-v3"
+    rerank_candidate_multiplier: int = 4
 
     def search(self, query: str, *, top_k: int = 5) -> list[SearchHit]:
         semantic_ranked = self._semantic_ranked_indices(query, limit=max(top_k * 5, 10))
         bm25_ranked = self.bm25_index.ranked_indices(query, limit=max(top_k * 5, 10))
         fused_scores = _reciprocal_rank_fusion([semantic_ranked, bm25_ranked])
 
-        ranked_indices = sorted(fused_scores, key=fused_scores.get, reverse=True)[:top_k]
+        candidate_limit = max(top_k * self.rerank_candidate_multiplier, top_k)
+        candidate_indices = sorted(fused_scores, key=fused_scores.get, reverse=True)[:candidate_limit]
+
+        if self.jina_api_key and candidate_indices:
+            reranked = self._rerank(query, candidate_indices, top_k=top_k)
+            if reranked is not None:
+                return reranked
+
+        ranked_indices = candidate_indices[:top_k]
         return [
             SearchHit(
                 score=float(fused_scores[index]),
                 document=_document_with_retrieval_metadata(self.chunks[index], fused_scores[index]),
             )
             for index in ranked_indices
+        ]
+
+    def _rerank(self, query: str, candidate_indices: list[int], *, top_k: int) -> list[SearchHit] | None:
+        documents = [self.chunks[index].page_content for index in candidate_indices]
+        try:
+            results = retry_with_backoff(
+                lambda: _jina_rerank(
+                    query,
+                    documents,
+                    api_key=self.jina_api_key,
+                    model=self.jina_reranker_model,
+                    top_n=top_k,
+                ),
+                attempts=self.retry_attempts,
+                label="Jina rerank",
+            )
+        except Exception:
+            return None
+
+        return [
+            SearchHit(
+                score=float(relevance_score),
+                document=_document_with_retrieval_metadata(
+                    self.chunks[candidate_indices[local_index]], relevance_score
+                ),
+            )
+            for local_index, relevance_score in results
         ]
 
     def _semantic_ranked_indices(self, query: str, *, limit: int) -> list[int]:
@@ -124,6 +163,34 @@ class CorpusIndex:
             if index is not None:
                 ranked_indices.append(index)
         return ranked_indices
+
+
+def _jina_rerank(
+    query: str,
+    documents: list[str],
+    *,
+    api_key: str,
+    model: str,
+    top_n: int,
+) -> list[tuple[int, float]]:
+    response = requests.post(
+        "https://api.jina.ai/v1/rerank",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        json={
+            "model": model,
+            "query": query,
+            "top_n": top_n,
+            "documents": documents,
+            "return_documents": False,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return [(result["index"], result["relevance_score"]) for result in payload["results"]]
 
 
 def _tokenize(text: str) -> list[str]:
@@ -398,6 +465,9 @@ def load_corpus_index_from_qdrant(
     qdrant_api_key: str | None = None,
     collection_name: str = "virallens_corpus",
     retry_attempts: int = 4,
+    jina_api_key: str | None = None,
+    jina_reranker_model: str = "jina-reranker-v3",
+    rerank_candidate_multiplier: int = 4,
 ) -> CorpusIndex:
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
@@ -463,6 +533,9 @@ def load_corpus_index_from_qdrant(
         bm25_index=bm25_index,
         retry_attempts=retry_attempts,
         numeric_id_to_index=numeric_id_to_index,
+        jina_api_key=jina_api_key,
+        jina_reranker_model=jina_reranker_model,
+        rerank_candidate_multiplier=rerank_candidate_multiplier,
     )
 
 
@@ -478,6 +551,9 @@ def build_corpus_index(
     retry_attempts: int = 4,
     embedding_batch_size: int = 64,
     embedding_max_concurrency: int = 4,
+    jina_api_key: str | None = None,
+    jina_reranker_model: str = "jina-reranker-v3",
+    rerank_candidate_multiplier: int = 4,
 ) -> CorpusIndex:
     if not chunks:
         raise ValueError("Cannot build an index from an empty chunk list")
@@ -565,6 +641,9 @@ def build_corpus_index(
         bm25_index=bm25_index,
         retry_attempts=retry_attempts,
         numeric_id_to_index=numeric_id_to_index,
+        jina_api_key=jina_api_key,
+        jina_reranker_model=jina_reranker_model,
+        rerank_candidate_multiplier=rerank_candidate_multiplier,
     )
 
 
