@@ -13,9 +13,9 @@ class AppConfig:
     chunk_size: int = 1200
     chunk_overlap: int = 180
     top_k: int = 5
-    provider: str = "groq"
-    model_name: str = "llama-3.1-8b-instant"
-    embedding_model_name: str = "text-embedding-3-small"
+    provider: str = "gemini"
+    model_name: str = "gemini-2.5-flash"
+    embedding_model_name: str = "models/embedding-001"
     qdrant_url: str | None = None
     qdrant_api_key: str | None = None
     qdrant_path: str = ".qdrant"
@@ -43,11 +43,11 @@ class AppConfig:
             chunk_size=int(os.getenv("CHUNK_SIZE", "1200")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "180")),
             top_k=int(os.getenv("TOP_K", "5")),
-            provider=os.getenv("MODEL_PROVIDER", "groq").strip().lower(),
-            model_name=os.getenv("MODEL_NAME", "llama-3.1-8b-instant").strip(),
+            provider=os.getenv("MODEL_PROVIDER", "gemini").strip().lower(),
+            model_name=os.getenv("MODEL_NAME", "gemini-2.5-flash").strip(),
             embedding_model_name=os.getenv(
                 "EMBEDDING_MODEL_NAME",
-                "text-embedding-3-small",
+                "models/embedding-001",
             ).strip(),
             qdrant_url=os.getenv("QDRANT_URL") or None,
             qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,

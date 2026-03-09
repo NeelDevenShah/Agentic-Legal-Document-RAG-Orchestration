@@ -15,7 +15,7 @@ import requests
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
@@ -388,15 +388,15 @@ def create_qdrant_client(
 
 
 def _create_embeddings(embedding_model_name: str | None = None) -> Embeddings:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "OPENAI_API_KEY is not set. Add it to .env to build the embedding index."
+            "GEMINI_API_KEY is not set. Add it to .env to build the embedding index."
         )
 
-    return OpenAIEmbeddings(
-        model=(embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-3-small")).strip(),
-        api_key=api_key,
+    return GoogleGenerativeAIEmbeddings(
+        model=(embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "models/embedding-001")).strip(),
+        google_api_key=api_key,
     )
 
 

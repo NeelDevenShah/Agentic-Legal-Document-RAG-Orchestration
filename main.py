@@ -90,20 +90,16 @@ def _build_model(config: AppConfig):
 
 
 def _require_api_key(provider: str) -> None:
-    if provider == "groq" and not os.getenv("GROQ_API_KEY"):
+    if not os.getenv("GEMINI_API_KEY"):
         raise RuntimeError(
-            "GROQ_API_KEY is not set. Add it to .env to run the Groq-backed demo."
-        )
-    if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError(
-            "OPENAI_API_KEY is not set. Add it to .env to run the OpenAI-backed demo."
+            "GEMINI_API_KEY is not set. Add it to .env to run the demo."
         )
 
 
 def _require_embedding_api_key() -> None:
-    if not os.getenv("OPENAI_API_KEY"):
+    if not os.getenv("GEMINI_API_KEY"):
         raise RuntimeError(
-            "OPENAI_API_KEY is not set. Add it to .env to build or query the embedding index."
+            "GEMINI_API_KEY is not set. Add it to .env to build or query the embedding index."
         )
 
 
