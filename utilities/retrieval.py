@@ -306,18 +306,21 @@ def _generate_document_metadata(
 
 
 def _profile_to_text(profile: dict[str, Any]) -> str:
-    parts = [
-        profile.get("title", ""),
-        profile.get("document_type", ""),
-        profile.get("summary", ""),
-        ", ".join(profile.get("keywords", [])),
-        ", ".join(profile.get("entities", [])),
-        ", ".join(profile.get("topics", [])),
-        ", ".join(profile.get("important_dates", [])),
-        ", ".join(profile.get("parties", [])),
-        str(profile.get("jurisdiction") or ""),
-    ]
-    return normalize_whitespace(" ".join(part for part in parts if part))
+    """Extract metadata keywords from profile for searching."""
+    parts = []
+    if profile.get("title"):
+        parts.append(profile["title"])
+    if profile.get("keywords"):
+        parts.extend(profile["keywords"])
+    if profile.get("parties"):
+        parts.extend(profile["parties"])
+    if profile.get("entities"):
+        parts.extend(profile["entities"])
+    if profile.get("topics"):
+        parts.extend(profile["topics"])
+    if profile.get("important_dates"):
+        parts.extend(profile["important_dates"])
+    return normalize_whitespace(" ".join(str(part) for part in parts if part))
 
 
 def _safe_chunk_id(metadata: dict[str, Any]) -> str:
@@ -515,7 +518,9 @@ def load_corpus_index_from_qdrant(
     numeric_ids = [numeric_id for _, _, numeric_id in paired]
 
     search_texts = [
-        str(chunk.metadata.get("search_text") or chunk.page_content)
+        normalize_whitespace(
+            f"{_profile_to_text(chunk.metadata)} {chunk.page_content}"
+        )
         for chunk in enriched_chunks
     ]
     embeddings = _create_embeddings(embedding_model_name)
@@ -561,15 +566,15 @@ def build_corpus_index(
     embeddings = _create_embeddings(embedding_model_name)
 
     grouped_chunks = _group_chunks_by_source(chunks)
-    source_profiles = {
-        source: _generate_document_metadata(
+    source_profiles = {}
+    for source, source_chunks in grouped_chunks.items():
+        first_chunk_text = source_chunks[0].page_content if source_chunks else ""
+        source_profiles[source] = _generate_document_metadata(
             metadata_llm,
             source,
-            "\n\n".join(chunk.page_content for chunk in source_chunks),
+            first_chunk_text,
             retry_attempts=retry_attempts,
         )
-        for source, source_chunks in grouped_chunks.items()
-    }
 
     enriched_chunks: list[Document] = []
     chunk_ids: list[str] = []
@@ -580,14 +585,15 @@ def build_corpus_index(
         source = str(metadata.get("path") or metadata.get("source") or "unknown")
         profile = source_profiles[source]
         metadata.update(profile)
-        metadata["document_profile_text"] = _profile_to_text(profile)
-        metadata["search_text"] = normalize_whitespace(f"{metadata['document_profile_text']} {chunk.page_content}")
         metadata["chunk_id"] = _safe_chunk_id(metadata)
+
+        metadata_keywords = _profile_to_text(profile)
+        search_text = normalize_whitespace(f"{metadata_keywords} {chunk.page_content}")
 
         enriched_chunk = Document(page_content=chunk.page_content, metadata=metadata)
         enriched_chunks.append(enriched_chunk)
         chunk_ids.append(metadata["chunk_id"])
-        search_texts.append(metadata["search_text"])
+        search_texts.append(search_text)
 
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
