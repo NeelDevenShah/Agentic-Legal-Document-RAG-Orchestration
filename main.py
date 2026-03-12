@@ -49,6 +49,7 @@ def _qdrant_settings(config: AppConfig) -> dict[str, object]:
         "qdrant_api_key": config.qdrant_api_key,
         "collection_name": config.qdrant_collection_name,
         "embedding_model_name": config.embedding_model_name,
+        "provider": config.provider,
     }
 
 
@@ -90,16 +91,28 @@ def _build_model(config: AppConfig):
 
 
 def _require_api_key(provider: str) -> None:
-    if not os.getenv("GEMINI_API_KEY"):
+    provider = provider.lower().strip()
+    if provider == "openai":
+        api_key_name = "OPENAI_API_KEY"
+    else:
+        api_key_name = "GEMINI_API_KEY"
+
+    if not os.getenv(api_key_name):
         raise RuntimeError(
-            "GEMINI_API_KEY is not set. Add it to .env to run the demo."
+            f"{api_key_name} is not set. Add it to .env to run the demo."
         )
 
 
-def _require_embedding_api_key() -> None:
-    if not os.getenv("GEMINI_API_KEY"):
+def _require_embedding_api_key(provider: str = "gemini") -> None:
+    provider = provider.lower().strip()
+    if provider == "openai":
+        api_key_name = "OPENAI_API_KEY"
+    else:
+        api_key_name = "GEMINI_API_KEY"
+
+    if not os.getenv(api_key_name):
         raise RuntimeError(
-            "GEMINI_API_KEY is not set. Add it to .env to build or query the embedding index."
+            f"{api_key_name} is not set. Add it to .env to build or query the embedding index."
         )
 
 
@@ -129,8 +142,9 @@ def _resolve_index(config: AppConfig):
 
 def _index_new_files(config: AppConfig, uploaded_files=None) -> str:
     if not uploaded_files:
-        raise gr.Error("Please upload at least one PDF before clicking Index new files.")
-    _require_embedding_api_key()
+        gr.Warning("Please upload at least one PDF before clicking Index new files.")
+        return "No files uploaded. Please upload PDFs to index."
+    _require_embedding_api_key(config.provider)
     _require_api_key(config.provider)
     model = _build_model(config)
     index, chunks, source_label = _build_runtime(
@@ -157,7 +171,7 @@ def _build_answers(
     config: AppConfig,
 ):
     _require_api_key(config.provider)
-    _require_embedding_api_key()
+    _require_embedding_api_key(config.provider)
     model = _build_model(config)
     index, chunk_count, source_label = _resolve_index(config)
 
@@ -205,7 +219,6 @@ def build_demo() -> gr.Blocks:
         with gr.Row():
             index_button = gr.Button("Index new files", variant="primary")
             clear_button = gr.Button("Clear DB", variant="stop")
-            run_button = gr.Button("Run")
         index_status = gr.Textbox(
             label="Index status",
             lines=2,
@@ -224,6 +237,7 @@ def build_demo() -> gr.Blocks:
                 value="both",
                 label="Flow",
             )
+        run_button = gr.Button("Run", variant="primary")
 
         output = gr.Textbox(label="Answer", lines=24)
 

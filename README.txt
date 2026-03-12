@@ -110,11 +110,22 @@ Query: "What does Rule 10b-5 address?"
 
 ### Document Metadata Enrichment
 After chunking, an LLM generates metadata from the **first page only**:
-- **_generate_document_metadata()** calls the model with only the first chunk's text (first page)
-- Returns JSON with: `title`, `document_type`, `summary`, `keywords`, `entities`, `topics`, `important_dates`, `parties`, `jurisdiction`
-- Falls back to keyword extraction (top 8 tokens by frequency) if the LLM call fails
-- Extracted metadata is attached to **every chunk** of that source, enabling consistent document-level context across all chunks
-- This is optimized for legal documents where header/title/party information appears on the first page
+- **_generate_document_metadata()** calls Gemini with only the first chunk's text (first page)
+- Extracts critical legal document metadata:
+  - `title`: Case name (e.g., "LAST ATLANTIS CAPITAL LLC v. AGS SPECIALIST PARTNERS")
+  - `document_type`: Type of legal document (e.g., "court_opinion", "memorandum_order")
+  - `summary`: One-sentence purpose of the document
+  - `keywords`: Key legal concepts from the document (e.g., ["Rule 10b-5", "motion for summary judgment"])
+  - `parties`: Array of party names with their roles (e.g., ["LAST ATLANTIS CAPITAL LLC (Plaintiff)", "AGS SPECIALIST PARTNERS (Defendant)"])
+  - `jurisdiction`: Full jurisdiction information (e.g., "United States District Court, Northern District of Illinois")
+
+- **LLM-Only Extraction:** Uses Gemini's instruction-following ability to extract from first page text
+  - Prompt explicitly instructs where to find parties, jurisdiction, case name
+  - Returns structured JSON with these critical fields
+  - If extraction fails, returns empty values (no regex fallback)
+
+- Extracted metadata is attached to **every chunk** of that source, enabling consistent document-level context
+- This approach trusts the LLM to correctly identify parties and jurisdiction from the first page header where they are always clearly visible
 
 ## Retrieval Index
 

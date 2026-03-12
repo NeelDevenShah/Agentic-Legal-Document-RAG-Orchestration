@@ -16,6 +16,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
@@ -24,9 +25,16 @@ from .utils import message_content_to_text, normalize_whitespace, retry_with_bac
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
 _METADATA_PROMPT = (
-    "You create document-level metadata for retrieval. "
-    "Return valid JSON only with these keys: title, document_type, summary, keywords, entities, topics, important_dates, parties, jurisdiction. "
-    "Use concise strings or arrays of strings. If a field is unknown, use null or an empty list. Do not wrap the answer in markdown."
+    "Extract metadata from a legal document header. Return ONLY valid JSON (no markdown, no explanation).\n"
+    "Required fields: title, document_type, summary, keywords, parties, jurisdiction\n"
+    "Instructions:\n"
+    "- title: Case name or document title (e.g., 'LAST ATLANTIS CAPITAL LLC v. AGS SPECIALIST PARTNERS')\n"
+    "- document_type: Type of legal document (e.g., 'court_opinion', 'memorandum_order', 'motion', etc.)\n"
+    "- summary: One sentence summary of the document's purpose\n"
+    "- keywords: Array of 3-5 key legal concepts (e.g., ['Rule 10b-5', 'motion for summary judgment', 'dismissal'])\n"
+    "- parties: Array of party names with their roles (e.g., ['LAST ATLANTIS CAPITAL LLC (Plaintiff)', 'AGS SPECIALIST PARTNERS (Defendant)'])\n"
+    "- jurisdiction: Full jurisdiction information (e.g., 'United States District Court, Northern District of Illinois, Eastern Division')\n"
+    "If a field cannot be determined, use null or empty array. Return JSON object only."
 )
 
 
@@ -148,7 +156,7 @@ class CorpusIndex:
         query_vector = retry_with_backoff(
             lambda: self.embeddings.embed_query(query),
             attempts=self.retry_attempts,
-            label="OpenAI embeddings query",
+            label="Embeddings query",
         )
         results = self.qdrant_client.query_points(
             collection_name=self.collection_name,
@@ -242,19 +250,14 @@ def _ensure_string_list(value: Any) -> list[str]:
 
 
 def _fallback_document_metadata(source: str, text: str) -> dict[str, Any]:
-    tokens = _tokenize(text)
-    keyword_counts = Counter(token for token in tokens if len(token) > 3)
-    keywords = [token for token, _ in keyword_counts.most_common(8)]
+    """Fallback metadata when LLM extraction fails. Returns minimal data."""
     return {
         "title": Path(source).stem.replace("_", " ").strip() or source,
-        "document_type": "pdf",
-        "summary": normalize_whitespace(text[:500]) if text else "",
-        "keywords": keywords,
-        "entities": [],
-        "topics": keywords[:5],
-        "important_dates": [],
+        "document_type": "legal_document",
+        "summary": "",
+        "keywords": [],
         "parties": [],
-        "jurisdiction": None,
+        "jurisdiction": "",
     }
 
 
@@ -296,30 +299,38 @@ def _generate_document_metadata(
         "document_type": str(payload.get("document_type") or profile["document_type"]),
         "summary": normalize_whitespace(str(payload.get("summary") or profile["summary"])),
         "keywords": _ensure_string_list(payload.get("keywords")) or profile["keywords"],
-        "entities": _ensure_string_list(payload.get("entities")),
-        "topics": _ensure_string_list(payload.get("topics")) or profile["topics"],
-        "important_dates": _ensure_string_list(payload.get("important_dates")),
-        "parties": _ensure_string_list(payload.get("parties")),
-        "jurisdiction": payload.get("jurisdiction") or profile["jurisdiction"],
+        "parties": _ensure_string_list(payload.get("parties")) or profile.get("parties", []),
+        "jurisdiction": str(payload.get("jurisdiction") or profile.get("jurisdiction") or ""),
     })
     return profile
 
 
 def _profile_to_text(profile: dict[str, Any]) -> str:
-    """Extract metadata keywords from profile for searching."""
+    """Extract legal document metadata keywords for searching."""
     parts = []
+
     if profile.get("title"):
         parts.append(profile["title"])
-    if profile.get("keywords"):
-        parts.extend(profile["keywords"])
+
     if profile.get("parties"):
-        parts.extend(profile["parties"])
-    if profile.get("entities"):
-        parts.extend(profile["entities"])
-    if profile.get("topics"):
-        parts.extend(profile["topics"])
-    if profile.get("important_dates"):
-        parts.extend(profile["important_dates"])
+        parties = profile["parties"]
+        if isinstance(parties, list):
+            parts.extend(str(p) for p in parties if p)
+        elif parties:
+            parts.append(str(parties))
+
+    if profile.get("jurisdiction"):
+        jurisdiction = profile["jurisdiction"]
+        if jurisdiction:
+            parts.append(str(jurisdiction))
+
+    if profile.get("keywords"):
+        keywords = profile["keywords"]
+        if isinstance(keywords, list):
+            parts.extend(str(k) for k in keywords if k)
+        elif keywords:
+            parts.append(str(keywords))
+
     return normalize_whitespace(" ".join(str(part) for part in parts if part))
 
 
@@ -390,17 +401,30 @@ def create_qdrant_client(
     return QdrantClient(path=str(Path(qdrant_path).expanduser()))
 
 
-def _create_embeddings(embedding_model_name: str | None = None) -> Embeddings:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not set. Add it to .env to build the embedding index."
-        )
+def _create_embeddings(embedding_model_name: str | None = None, provider: str = "gemini") -> Embeddings:
+    model_name = (embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "models/embedding-001")).strip()
+    provider = provider.lower().strip()
 
-    return GoogleGenerativeAIEmbeddings(
-        model=(embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "models/embedding-001")).strip(),
-        google_api_key=api_key,
-    )
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is not set. Add it to .env to build the embedding index."
+            )
+        return OpenAIEmbeddings(model=model_name, api_key=api_key)
+
+    elif provider == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Add it to .env to build the embedding index."
+            )
+        return GoogleGenerativeAIEmbeddings(
+            model=model_name,
+            google_api_key=api_key,
+        )
+    else:
+        raise ValueError(f"Unsupported embedding provider: {provider}. Use 'openai' or 'gemini'.")
 
 
 def _embed_documents_concurrently(
@@ -431,7 +455,7 @@ def _embed_documents_concurrently(
                 retry_with_backoff,
                 lambda batch=batch: embed_batch(batch),
                 attempts=retry_attempts,
-                label=f"OpenAI embeddings batch {index + 1}/{len(batches)}",
+                label=f"Embeddings batch {index + 1}/{len(batches)}",
             ): index
             for index, batch in enumerate(batches)
         }
@@ -448,6 +472,7 @@ def clear_qdrant_collection(
     qdrant_api_key: str | None = None,
     collection_name: str = "virallens_corpus",
     embedding_model_name: str | None = None,
+    provider: str = "gemini",
 ) -> str:
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
@@ -471,6 +496,7 @@ def load_corpus_index_from_qdrant(
     jina_api_key: str | None = None,
     jina_reranker_model: str = "jina-reranker-v3",
     rerank_candidate_multiplier: int = 4,
+    provider: str = "gemini",
 ) -> CorpusIndex:
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
@@ -523,7 +549,7 @@ def load_corpus_index_from_qdrant(
         )
         for chunk in enriched_chunks
     ]
-    embeddings = _create_embeddings(embedding_model_name)
+    embeddings = _create_embeddings(embedding_model_name, provider=provider)
     bm25_index = _build_bm25_index(search_texts)
     chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
     numeric_id_to_index = {numeric_id: index for index, numeric_id in enumerate(numeric_ids)}
@@ -559,11 +585,12 @@ def build_corpus_index(
     jina_api_key: str | None = None,
     jina_reranker_model: str = "jina-reranker-v3",
     rerank_candidate_multiplier: int = 4,
+    provider: str = "gemini",
 ) -> CorpusIndex:
     if not chunks:
         raise ValueError("Cannot build an index from an empty chunk list")
 
-    embeddings = _create_embeddings(embedding_model_name)
+    embeddings = _create_embeddings(embedding_model_name, provider=provider)
 
     grouped_chunks = _group_chunks_by_source(chunks)
     source_profiles = {}
@@ -600,46 +627,82 @@ def build_corpus_index(
         qdrant_url=qdrant_url,
         qdrant_api_key=qdrant_api_key,
     )
+
+    existing_chunks = []
+    existing_chunk_ids = []
+    existing_search_texts = []
+
     if qdrant_client.collection_exists(collection_name):
-        qdrant_client.delete_collection(collection_name)
+        next_offset = None
+        while True:
+            records, next_offset = qdrant_client.scroll(
+                collection_name=collection_name,
+                limit=256,
+                offset=next_offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not records:
+                break
+            for record in records:
+                payload = dict(record.payload or {})
+                page_content = str(payload.pop("page_content", ""))
+                metadata = dict(payload)
+                if "chunk_id" not in metadata:
+                    metadata["chunk_id"] = str(record.id)
+                existing_chunk = Document(page_content=page_content, metadata=metadata)
+                existing_chunks.append(existing_chunk)
+                existing_chunk_ids.append(str(metadata["chunk_id"]))
+                existing_search_texts.append(
+                    normalize_whitespace(f"{_profile_to_text(metadata)} {page_content}")
+                )
+            if next_offset is None:
+                break
+
+    all_chunks = existing_chunks + enriched_chunks
+    all_chunk_ids = existing_chunk_ids + chunk_ids
+    all_search_texts = existing_search_texts + search_texts
 
     embeddings_matrix = np.asarray(
         _embed_documents_concurrently(
             embeddings,
-            search_texts,
+            all_search_texts,
             batch_size=embedding_batch_size,
             max_concurrency=embedding_max_concurrency,
             retry_attempts=retry_attempts,
         ),
         dtype=np.float32,
     )
-    qdrant_client.create_collection(
-        collection_name=collection_name,
-        vectors_config=VectorParams(size=embeddings_matrix.shape[1], distance=Distance.COSINE),
-    )
+
+    if not qdrant_client.collection_exists(collection_name):
+        qdrant_client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=embeddings_matrix.shape[1], distance=Distance.COSINE),
+        )
+
     qdrant_client.upsert(
         collection_name=collection_name,
         points=[
             PointStruct(
-                id=_chunk_id_to_numeric(chunk_ids[index]),
+                id=_chunk_id_to_numeric(all_chunk_ids[index]),
                 vector=embeddings_matrix[index].tolist(),
                 payload={
-                    **enriched_chunks[index].metadata,
-                    "page_content": enriched_chunks[index].page_content,
-                    "chunk_id": chunk_ids[index],
+                    **all_chunks[index].metadata,
+                    "page_content": all_chunks[index].page_content,
+                    "chunk_id": all_chunk_ids[index],
                 },
             )
-            for index in range(len(enriched_chunks))
+            for index in range(len(all_chunks))
         ],
     )
 
-    bm25_index = _build_bm25_index(search_texts)
-    chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
-    numeric_id_to_index = {_chunk_id_to_numeric(chunk_id): index for index, chunk_id in enumerate(chunk_ids)}
+    bm25_index = _build_bm25_index(all_search_texts)
+    chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(all_chunk_ids)}
+    numeric_id_to_index = {_chunk_id_to_numeric(chunk_id): index for index, chunk_id in enumerate(all_chunk_ids)}
 
     return CorpusIndex(
-        chunks=enriched_chunks,
-        chunk_ids=chunk_ids,
+        chunks=all_chunks,
+        chunk_ids=all_chunk_ids,
         chunk_id_to_index=chunk_id_to_index,
         embeddings=embeddings,
         qdrant_client=qdrant_client,
