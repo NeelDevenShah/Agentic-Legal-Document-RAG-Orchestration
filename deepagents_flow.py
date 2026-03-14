@@ -48,7 +48,7 @@ def build_deepagents_graph(
 
     return create_deep_agent(
         model=model,
-        tools=[search_tool],
+        tools=[],
         system_prompt=DEEPAGENTS_SYSTEM_PROMPT,
         subagents=subagents,
     )
