@@ -20,10 +20,6 @@ class AppConfig:
     qdrant_api_key: str | None = None
     qdrant_path: str = ".qdrant"
     qdrant_collection_name: str = "virallens_corpus"
-    mysql_url: str | None = None
-    mysql_messages_table: str = "messages"
-    mysql_sessions_table: str = "sessions"
-    mysql_memory_table: str = "memory_entries"
     temperature: float = 0.0
     retry_attempts: int = 4
     embedding_batch_size: int = 64
@@ -53,10 +49,6 @@ class AppConfig:
             qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
             qdrant_path=os.getenv("QDRANT_PATH", ".qdrant").strip(),
             qdrant_collection_name=os.getenv("QDRANT_COLLECTION_NAME", "virallens_corpus").strip(),
-            mysql_url=os.getenv("MYSQL_URL") or None,
-            mysql_messages_table=os.getenv("MYSQL_MESSAGES_TABLE", "messages").strip(),
-            mysql_sessions_table=os.getenv("MYSQL_SESSIONS_TABLE", "sessions").strip(),
-            mysql_memory_table=os.getenv("MYSQL_MEMORY_TABLE", "memory_entries").strip(),
             temperature=float(os.getenv("MODEL_TEMPERATURE", "0")),
             retry_attempts=int(os.getenv("RETRY_ATTEMPTS", "4")),
             embedding_batch_size=max(1, int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))),

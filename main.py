@@ -209,7 +209,7 @@ def build_demo() -> gr.Blocks:
         gr.Markdown(
             "# Virallens Multi-Agent RAG\n"
             "Upload PDFs (optional), click **Index new files**, then **Run** a question. "
-            "Use **Clear DB** to wipe Qdrant and MySQL storage."
+            "Use **Clear DB** to wipe Qdrant storage."
         )
         uploaded_files = gr.File(
             label="Upload PDFs (optional)",

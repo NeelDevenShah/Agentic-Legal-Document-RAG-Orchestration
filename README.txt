@@ -25,7 +25,6 @@ The system is divided into three main layers:
 - **DeepAgents multi-agent flow** — orchestrator with research and synthesis subagents
 - **Gradio web interface** — user-friendly UI for querying and index management
 - **Qdrant vector database** — persistent semantic index storage (local or remote)
-- **MySQL persistence** (optional) — stores messages, sessions, and memory entries
 - **Exponential backoff retry logic** — handles transient API failures across all LLM and embedding calls
 
 ## Data Ingestion & Chunking Pipeline
@@ -415,12 +414,6 @@ All runtime settings are loaded from `.env` file through the **AppConfig** datac
 - **JINA_RERANKER_MODEL** (default: `jina-reranker-v3`) — Jina model version
 - **RERANK_CANDIDATE_MULTIPLIER** (default: 4) — multiplier for candidates sent to reranker
 
-### MySQL Persistence (optional)
-- **MYSQL_URL** (default: None) — MySQL connection string (enables persistence if set)
-- **MYSQL_MESSAGES_TABLE** (default: `messages`) — table for message logs
-- **MYSQL_SESSIONS_TABLE** (default: `sessions`) — table for session tracking
-- **MYSQL_MEMORY_TABLE** (default: `memory_entries`) — table for agent memory
-
 ### Resilience
 - **RETRY_ATTEMPTS** (default: 4) — number of retry attempts for transient failures
 - Retry logic uses exponential backoff with jitter: `delay = min(base * (2 ** attempt), max_delay)`
@@ -488,7 +481,7 @@ The web UI (built with Gradio) provides:
 1. **PDF Upload** — optional file upload for custom documents
 2. **Index Status Display** — shows how many chunks are indexed and their source
 3. **Index New Files** — chunks and indexes uploaded PDFs (or defaults to `data/` if none uploaded)
-4. **Clear DB** — deletes Qdrant collection and MySQL tables for a fresh start
+4. **Clear DB** — deletes Qdrant collection for a fresh start
 5. **Question Input** — textarea for entering queries (pre-filled with default question)
 6. **Flow Selector** — radio buttons to choose:
    - `langgraph` — simple retrieve-answer pipeline
@@ -562,7 +555,7 @@ This launches the Gradio app at `http://localhost:7860`.
 
 ## Docker
 
-The repository includes `docker-compose.yml` for containerized deployment with Qdrant and MySQL:
+The repository includes `docker-compose.yml` for containerized deployment with Qdrant:
 
 ### Setup
 1. Copy `.env.sample` to `.env` and fill in your Google Gemini API key:
@@ -574,17 +567,15 @@ The repository includes `docker-compose.yml` for containerized deployment with Q
    ```bash
    docker compose up --build
    ```
-3. Wait for all services to be healthy (Qdrant, MySQL, app)
+3. Wait for all services to be healthy (Qdrant, app)
 4. Open the app at `http://localhost:7860`
 
 ### Services
 - **app** — Virallens FastAPI/Gradio application
 - **qdrant** — Vector database for semantic embeddings
-- **mysql** — MySQL database for messages, sessions, and memory
 
 ### Compose Configuration
 - Qdrant: exposed on `localhost:6333` (can be used by other clients)
-- MySQL: exposed on `localhost:3306` (stores all persistence data)
 - App: exposed on `localhost:7860`
 - Environment variables are shared via `.env` file
 

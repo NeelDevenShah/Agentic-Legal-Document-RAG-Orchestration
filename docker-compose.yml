@@ -11,15 +11,12 @@ services:
       QDRANT_API_KEY: ""
       QDRANT_PATH: /tmp/qdrant
       QDRANT_COLLECTION_NAME: virallens_corpus
-      MYSQL_URL: mysql://virallens:virallens@mysql:3306/virallens
       GRADIO_SERVER_NAME: 0.0.0.0
       GRADIO_SERVER_PORT: 7860
     volumes:
       - .:/app
     depends_on:
       qdrant:
-        condition: service_healthy
-      mysql:
         condition: service_healthy
     ports:
       - "7860:7860"
@@ -43,25 +40,5 @@ services:
       retries: 12
       start_period: 10s
 
-  mysql:
-    image: mysql:8.4
-    container_name: virallens-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: virallens
-      MYSQL_USER: virallens
-      MYSQL_PASSWORD: virallens
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-    ports:
-      - "3306:3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
 volumes:
   qdrant_storage:
-  mysql_data:
