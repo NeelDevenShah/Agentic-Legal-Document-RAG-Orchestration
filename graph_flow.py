@@ -67,12 +67,13 @@ def run_langgraph_rag(
         top_k=top_k,
         retry_attempts=retry_attempts,
     )
-    result = retry_with_backoff(
-        lambda: graph.invoke({"question": question}),
-        attempts=retry_attempts,
-        label="LangGraph orchestration",
-    )
-    answer = result.get("answer", "")
-    if answer:
+
+    def _invoke():
+        result = graph.invoke({"question": question})
+        answer = result.get("answer", "") or extract_final_ai_text(result)
+        if any(marker in answer.lower() for marker in ("rate limit", "429", "too many requests", "tokens per min")):
+            raise RuntimeError(f"Rate limit hit in LangGraph output: {answer}")
         return answer
-    return extract_final_ai_text(result)
+
+    return retry_with_backoff(_invoke, attempts=max(retry_attempts, 6), label="LangGraph orchestration")
+

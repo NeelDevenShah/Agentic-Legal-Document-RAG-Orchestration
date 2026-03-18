@@ -62,15 +62,16 @@ def run_deepagents_rag(
     retry_attempts: int,
 ) -> str:
     agent = build_deepagents_graph(index=index, model=model)
-    result = retry_with_backoff(
-        lambda: agent.invoke(
+
+    def _invoke():
+        result = agent.invoke(
             {"messages": [HumanMessage(content=question)]},
             config={"recursion_limit": 25},
-        ),
-        attempts=retry_attempts,
-        label="DeepAgents orchestration",
-    )
-    answer = extract_final_ai_text(result)
-    if answer:
+        )
+        answer = extract_final_ai_text(result) or extract_final_ai_text({"messages": result.get("messages", [])})
+        if any(marker in answer.lower() for marker in ("rate limit", "429", "too many requests", "tokens per min")):
+            raise RuntimeError(f"Rate limit hit in DeepAgents output: {answer}")
         return answer
-    return extract_final_ai_text({"messages": result.get("messages", [])})
+
+    return retry_with_backoff(_invoke, attempts=max(retry_attempts, 6), label="DeepAgents orchestration")
+

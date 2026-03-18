@@ -78,7 +78,7 @@ def retry_with_backoff(
     attempts: int,
     label: str,
 ) -> T:
-    delay = 1.0
+    delay = 2.0
     last_error: Exception | None = None
 
     for attempt in range(1, attempts + 1):
@@ -90,10 +90,10 @@ def retry_with_backoff(
             is_retryable = any(marker in message for marker in _RATE_LIMIT_MARKERS)
             if attempt == attempts or not is_retryable:
                 raise
-            sleep_for = delay + random.uniform(0.0, 0.35)
-            print(f"{label} failed on attempt {attempt}/{attempts}; retrying in {sleep_for:.1f}s")
+            sleep_for = delay + random.uniform(0.1, 0.5)
+            print(f"{label} hit rate limit/error on attempt {attempt}/{attempts}; backing off for {sleep_for:.1f}s...")
             time.sleep(sleep_for)
-            delay *= 2
+            delay *= 2.0
 
     assert last_error is not None
     raise last_error
