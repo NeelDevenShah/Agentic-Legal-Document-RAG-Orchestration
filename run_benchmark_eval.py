@@ -269,8 +269,18 @@ def run_evaluation(
     lg_pass_rate = (lg_pass_count / total_samples) * 100
     da_pass_rate = (da_pass_count / total_samples) * 100
 
-    summary_md = f"""
-# RAG Benchmark Evaluation Results Summary
+    # Build per-case breakdown table
+    case_breakdown_rows = []
+    for r in eval_results:
+        q_short = (r["question"][:65] + "...") if len(r["question"]) > 65 else r["question"]
+        case_breakdown_rows.append(
+            f"| {r['sample_index']} | {q_short} | {r['langgraph_accuracy_score']:.1f} | {r['langgraph_latency_sec']:.2f}s | {r['deepagents_accuracy_score']:.1f} | {r['deepagents_latency_sec']:.2f}s |"
+        )
+    case_breakdown_table = "\n".join(case_breakdown_rows)
+
+    summary_md = f"""# RAG Benchmark Evaluation Results Summary
+
+## Aggregate Metrics
 
 | Metric | LangGraph Flow | DeepAgents Flow |
 |---|---|---|
@@ -279,14 +289,38 @@ def run_evaluation(
 | **Mean Citation Score (0-10)** | **{lg_avg_cite:.2f}** | **{da_avg_cite:.2f}** |
 | **Mean Latency per Query** | **{lg_avg_lat:.2f}s** | **{da_avg_lat:.2f}s** |
 
+## Per-Case Latency & Accuracy Breakdown
+
+| Case # | Question | LangGraph Score | LangGraph Latency | DeepAgents Score | DeepAgents Latency |
+|---|---|---|---|---|---|
+{case_breakdown_table}
+
 Results exported to: `{results_csv_file}`
 """
     print("\n" + "=" * 50)
     print(summary_md)
     print("=" * 50 + "\n")
 
+    # Save summary_md to the output directory
+    summary_file = results_csv_file.parent / "metrics_summary.md"
+    with open(summary_file, mode="w", encoding="utf-8") as f:
+        f.write(summary_md)
+    print(f"Saved summary metrics and per-case breakdown to {summary_file}")
+
     return eval_results
 
 
 if __name__ == "__main__":
-    run_evaluation()
+    import argparse
+    parser = argparse.ArgumentParser(description="Run RAG Benchmark Evaluation")
+    parser.add_argument("--input", type=str, default="rag_test_cases.csv", help="Input test cases CSV")
+    parser.add_argument("--output", type=str, default="evaluation_results.csv", help="Output results CSV")
+    parser.add_argument("--max-workers", type=int, default=2, help="Concurrency workers")
+    args = parser.parse_args()
+
+    run_evaluation(
+        input_csv_path=args.input,
+        output_results_csv=args.output,
+        max_workers=args.max_workers,
+    )
+

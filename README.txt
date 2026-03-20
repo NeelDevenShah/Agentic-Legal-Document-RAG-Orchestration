@@ -590,3 +590,17 @@ The repository includes `docker-compose.yml` for containerized deployment with Q
 - **Retry resilience**: All external API calls (LLM, embeddings, Jina) use exponential backoff to handle transient failures
 - **Flexible indexing**: Supports both local PDFs and user uploads, with optional metadata enrichment via LLM
 - **Multi-agent extensibility**: DeepAgents framework makes it easy to add more specialized subagents for complex reasoning tasks
+
+## Development Experience & Question Generation Updates
+
+During benchmarking and evaluation of the system, we encountered and resolved several issues related to evaluation datasets:
+
+1. **Chunk-Specific & Format-Specific Questions**: Initial QA generation created questions with meta-references (e.g., "according to the chunk", "in this chunk") and format-specific requirements (e.g., "what page numbers are listed in the table of authorities excerpt", "what heading appears on page 51"). These failed under realistic RAG settings because retrievers do not return formatting metadata/page structures, and the generator lacks context for "this chunk".
+2. **Ambiguous Contexts**: Questions like "On what statutory provision does the Supreme Court's jurisdiction rest in this case?" or references to "the defendants" or "the fund" without name context failed since the RAG system indexes multiple legal documents (Facebook, Macquarie, Upright Trust).
+3. **Smart Question Patching**: We developed a robust regeneration prompt instructing the LLM to write:
+   - **Fully Self-Contained Questions**: Questions must explicitly specify the case name (*Macquarie Infrastructure Corp. v. Moab Partners*, *Facebook v. Amalgamated Bank*), party (*Chiueh*, *Knight*), or statutory section (e.g. *Exchange Act Section 10(b)*).
+   * **Pure Content Focus**: Only ask about legal holdings, facts, allegations, and rules.
+   * **Zero Meta-References**: Absolutely no mention of "chunk", "page number", "excerpt", or "table of authorities".
+4. **Boilerplate Filtering**: Replaced empty boilerplate chunks (such as page 51 containing only the word "APPENDIX") with text-rich, content-based chunks.
+5. **Deduplication**: Ensured that the expanded 50-item evaluation set (`test_case_v2.csv`) has zero chunk overlap with the original 25 cases, and contains 100% compliant, RAG-compatible queries.
+6. **Codebase Consolidation**: Redundant temporary utilities and scattered scripts were removed. `generate_test_cases.py` was unified as the single, authoritative entry point for test case dataset generation with built-in deduplication, prompt validation, and dataset extension options.
