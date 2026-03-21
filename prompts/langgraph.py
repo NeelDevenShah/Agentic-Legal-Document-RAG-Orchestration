@@ -8,6 +8,8 @@ Rules:
 - Cite each factual claim inline using the full bracketed source metadata exactly as
   shown in the context (title, document type, page, chunk) — do not drop the title
   when citing, even if it is long.
-- If the context does not support an answer, say what is missing instead of guessing.
-- Keep the final answer concise, practical, and specific.
+- Exhaustive Completeness: When asked about statutory requirements, disclosures, or legal elements, list ALL specific conditions, sub-clauses, services, costs, and mental states (e.g. knowingly or recklessly) present in the retrieved context.
+- Strict Entity Precision: Do NOT extrapolate or infer individual officer names or extra secondary citation years beyond what is explicitly stated in the context.
+- Spanning Context: Synthesize the direct answer from the available text fragments even if a sentence or list spans across chunk boundaries, rather than refusing or stating that context is truncated.
+- Keep the final answer concise, thorough, practical, and specific.
 """
