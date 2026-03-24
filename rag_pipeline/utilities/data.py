@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
@@ -10,9 +9,7 @@ from pypdf import PdfReader
 
 from .utils import normalize_whitespace
 
-DEFAULT_UPLOAD_STAGING_DIR = Path(
-    os.getenv("UPLOAD_STAGING_DIR", "data/uploads")
-).resolve()
+DEFAULT_UPLOAD_STAGING_DIR = Path("data/uploads").resolve()
 
 
 def coerce_upload_path(uploaded_file) -> Path | None:
@@ -53,7 +50,7 @@ def stage_uploaded_pdfs(
         if not source_path.exists():
             raise FileNotFoundError(
                 f"Upload expired or missing: {source_path.name}. "
-                "Remove it from the list, upload again, then click Index new files."
+                "Remove it from the list, upload again, then click Index uploaded PDFs."
             )
 
         destination = staging_dir / source_path.name

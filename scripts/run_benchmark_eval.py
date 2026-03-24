@@ -8,14 +8,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from config import AppConfig
-from deepagents_flow import run_deepagents_rag
-from graph_flow import run_langgraph_rag
-from utilities.chunking import chunk_documents
-from utilities.data import load_pdf_documents
-from utilities.llm import ModelConfig, build_chat_model
-from utilities.retrieval import build_corpus_index, load_corpus_index_from_qdrant
-from utilities.utils import retry_with_backoff
+from rag_pipeline.config import AppConfig
+from rag_pipeline.deepagents_flow import run_deepagents_rag
+from rag_pipeline.graph_flow import run_langgraph_rag
+from rag_pipeline.utilities.chunking import chunk_documents
+from rag_pipeline.utilities.data import load_pdf_documents
+from rag_pipeline.utilities.llm import ModelConfig, build_chat_model
+from rag_pipeline.utilities.retrieval import build_corpus_index, load_corpus_index_from_qdrant
+from rag_pipeline.utilities.utils import retry_with_backoff
 
 
 def evaluate_single_sample(
@@ -144,9 +144,8 @@ def run_evaluation(
     print("Initializing LLM model...")
     model = build_chat_model(
         ModelConfig(
-            provider=config.provider,
             model_name=config.model_name,
-            temperature=config.temperature,
+            api_key=config.openai_api_key,
         )
     )
 
@@ -169,7 +168,7 @@ def run_evaluation(
         qdrant_api_key=config.qdrant_api_key,
         collection_name=config.qdrant_collection_name,
         embedding_model_name=config.embedding_model_name,
-        provider=config.provider,
+        openai_api_key=config.openai_api_key,
     )
     print(f"CorpusIndex ready with {len(index.chunks)} chunks.\n")
 
@@ -323,4 +322,3 @@ if __name__ == "__main__":
         output_results_csv=args.output,
         max_workers=args.max_workers,
     )
-

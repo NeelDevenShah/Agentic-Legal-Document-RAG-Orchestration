@@ -8,11 +8,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from config import AppConfig
-from utilities.chunking import chunk_documents
-from utilities.data import load_pdf_documents
-from utilities.llm import ModelConfig, build_chat_model
-from utilities.utils import retry_with_backoff
+from rag_pipeline.config import AppConfig
+from rag_pipeline.utilities.chunking import chunk_documents
+from rag_pipeline.utilities.data import load_pdf_documents
+from rag_pipeline.utilities.llm import ModelConfig, build_chat_model
+from rag_pipeline.utilities.utils import retry_with_backoff
 
 
 PROMPT_TEMPLATE = (
@@ -92,9 +92,8 @@ def generate_rag_test_cases(
 
     model = build_chat_model(
         ModelConfig(
-            provider=config.provider,
             model_name=config.model_name,
-            temperature=0.0,
+            api_key=config.openai_api_key,
         )
     )
 

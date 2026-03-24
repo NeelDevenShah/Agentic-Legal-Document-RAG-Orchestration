@@ -5,8 +5,8 @@ from typing import TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
-from prompts import LANGGRAPH_SYSTEM_PROMPT
-from utilities import CorpusIndex, extract_final_ai_text, format_search_hits, retry_with_backoff
+from rag_pipeline.prompts import LANGGRAPH_SYSTEM_PROMPT
+from rag_pipeline.utilities import CorpusIndex, extract_final_ai_text, format_search_hits, retry_with_backoff
 
 
 class RagState(TypedDict, total=False):
@@ -76,4 +76,3 @@ def run_langgraph_rag(
         return answer
 
     return retry_with_backoff(_invoke, attempts=max(retry_attempts, 6), label="LangGraph orchestration")
-

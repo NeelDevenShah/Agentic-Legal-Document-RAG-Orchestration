@@ -84,7 +84,7 @@ def retry_with_backoff(
     for attempt in range(1, attempts + 1):
         try:
             return action()
-        except Exception as exc:  # pragma: no cover - provider/network dependent
+        except Exception as exc:  # pragma: no cover - network/API dependent
             last_error = exc
             message = str(exc).lower()
             is_retryable = any(marker in message for marker in _RATE_LIMIT_MARKERS)

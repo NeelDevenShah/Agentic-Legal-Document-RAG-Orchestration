@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,7 +14,6 @@ import requests
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -401,30 +399,14 @@ def create_qdrant_client(
     return QdrantClient(path=str(Path(qdrant_path).expanduser()))
 
 
-def _create_embeddings(embedding_model_name: str | None = None, provider: str = "gemini") -> Embeddings:
-    model_name = (embedding_model_name or os.getenv("EMBEDDING_MODEL_NAME", "models/embedding-001")).strip()
-    provider = provider.lower().strip()
-
-    if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY is not set. Add it to .env to build the embedding index."
-            )
-        return OpenAIEmbeddings(model=model_name, api_key=api_key)
-
-    elif provider == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. Add it to .env to build the embedding index."
-            )
-        return GoogleGenerativeAIEmbeddings(
-            model=model_name,
-            google_api_key=api_key,
-        )
-    else:
-        raise ValueError(f"Unsupported embedding provider: {provider}. Use 'openai' or 'gemini'.")
+def _create_embeddings(
+    *,
+    embedding_model_name: str,
+    openai_api_key: str | None,
+) -> Embeddings:
+    if not openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set. Add it to .env to build the embedding index.")
+    return OpenAIEmbeddings(model=embedding_model_name, api_key=openai_api_key)
 
 
 def _embed_documents_concurrently(
@@ -471,8 +453,6 @@ def clear_qdrant_collection(
     qdrant_url: str | None = None,
     qdrant_api_key: str | None = None,
     collection_name: str = "virallens_corpus",
-    embedding_model_name: str | None = None,
-    provider: str = "gemini",
 ) -> str:
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
@@ -487,7 +467,8 @@ def clear_qdrant_collection(
 
 def load_corpus_index_from_qdrant(
     *,
-    embedding_model_name: str | None = None,
+    embedding_model_name: str,
+    openai_api_key: str | None,
     qdrant_path: str | Path = ".qdrant",
     qdrant_url: str | None = None,
     qdrant_api_key: str | None = None,
@@ -496,7 +477,6 @@ def load_corpus_index_from_qdrant(
     jina_api_key: str | None = None,
     jina_reranker_model: str = "jina-reranker-v3",
     rerank_candidate_multiplier: int = 4,
-    provider: str = "gemini",
 ) -> CorpusIndex:
     qdrant_client = create_qdrant_client(
         qdrant_path=qdrant_path,
@@ -504,7 +484,7 @@ def load_corpus_index_from_qdrant(
         qdrant_api_key=qdrant_api_key,
     )
     if not qdrant_client.collection_exists(collection_name):
-        raise RuntimeError("No indexed corpus found. Upload PDFs if needed, then click Index new files.")
+        raise RuntimeError("No indexed corpus found. Upload PDFs, then click Index uploaded PDFs.")
 
     enriched_chunks: list[Document] = []
     chunk_ids: list[str] = []
@@ -533,7 +513,7 @@ def load_corpus_index_from_qdrant(
             break
 
     if not enriched_chunks:
-        raise RuntimeError("The Qdrant collection is empty. Click Index new files to build the index.")
+        raise RuntimeError("The Qdrant collection is empty. Upload PDFs, then click Index uploaded PDFs.")
 
     paired = sorted(
         zip(chunk_ids, enriched_chunks, numeric_ids, strict=False),
@@ -549,7 +529,10 @@ def load_corpus_index_from_qdrant(
         )
         for chunk in enriched_chunks
     ]
-    embeddings = _create_embeddings(embedding_model_name, provider=provider)
+    embeddings = _create_embeddings(
+        embedding_model_name=embedding_model_name,
+        openai_api_key=openai_api_key,
+    )
     bm25_index = _build_bm25_index(search_texts)
     chunk_id_to_index = {chunk_id: index for index, chunk_id in enumerate(chunk_ids)}
     numeric_id_to_index = {numeric_id: index for index, numeric_id in enumerate(numeric_ids)}
@@ -573,7 +556,8 @@ def load_corpus_index_from_qdrant(
 def build_corpus_index(
     chunks: list[Document],
     *,
-    embedding_model_name: str | None = None,
+    embedding_model_name: str,
+    openai_api_key: str | None,
     metadata_llm: Any | None = None,
     qdrant_path: str | Path = ".qdrant",
     qdrant_url: str | None = None,
@@ -585,12 +569,14 @@ def build_corpus_index(
     jina_api_key: str | None = None,
     jina_reranker_model: str = "jina-reranker-v3",
     rerank_candidate_multiplier: int = 4,
-    provider: str = "gemini",
 ) -> CorpusIndex:
     if not chunks:
         raise ValueError("Cannot build an index from an empty chunk list")
 
-    embeddings = _create_embeddings(embedding_model_name, provider=provider)
+    embeddings = _create_embeddings(
+        embedding_model_name=embedding_model_name,
+        openai_api_key=openai_api_key,
+    )
 
     grouped_chunks = _group_chunks_by_source(chunks)
     source_profiles = {}
@@ -659,9 +645,21 @@ def build_corpus_index(
             if next_offset is None:
                 break
 
-    all_chunks = existing_chunks + enriched_chunks
-    all_chunk_ids = existing_chunk_ids + chunk_ids
-    all_search_texts = existing_search_texts + search_texts
+    merged_by_id: dict[str, tuple[Document, str]] = {
+        chunk_id: (chunk, search_text)
+        for chunk_id, chunk, search_text in zip(
+            existing_chunk_ids,
+            existing_chunks,
+            existing_search_texts,
+            strict=False,
+        )
+    }
+    for chunk_id, chunk, search_text in zip(chunk_ids, enriched_chunks, search_texts, strict=False):
+        merged_by_id[chunk_id] = (chunk, search_text)
+
+    all_chunk_ids = list(merged_by_id)
+    all_chunks = [chunk for chunk, _ in merged_by_id.values()]
+    all_search_texts = [search_text for _, search_text in merged_by_id.values()]
 
     embeddings_matrix = np.asarray(
         _embed_documents_concurrently(

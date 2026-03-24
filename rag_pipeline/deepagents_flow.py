@@ -4,12 +4,12 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from deepagents import create_deep_agent
 
-from prompts import (
+from rag_pipeline.prompts import (
     DEEPAGENTS_SYSTEM_PROMPT,
     RESEARCH_SUBAGENT_PROMPT,
     SYNTHESIS_SUBAGENT_PROMPT,
 )
-from utilities import CorpusIndex, extract_final_ai_text, format_search_hits, retry_with_backoff
+from rag_pipeline.utilities import CorpusIndex, extract_final_ai_text, format_search_hits, retry_with_backoff
 
 
 def build_search_tool(index: CorpusIndex):
@@ -74,4 +74,3 @@ def run_deepagents_rag(
         return answer
 
     return retry_with_backoff(_invoke, attempts=max(retry_attempts, 6), label="DeepAgents orchestration")
-
