@@ -1,4 +1,4 @@
-# Multi-Agent RAG Orchestration
+# Agentic Legal Document RAG Orchestration
 
 This repository implements a small multi-agent RAG workflow using LangChain,
 LangGraph, and DeepAgents. The application indexes user-uploaded PDFs, retrieves
@@ -119,20 +119,20 @@ LLM APIs, latency, and rate limits vary over time.
 
 ### Benchmark Summary
 
-| Metric | Exp. 1 LangGraph | Exp. 1 DeepAgents | Exp. 2 LangGraph | Exp. 2 DeepAgents | Exp. 3 Optimized LangGraph | Exp. 3 DeepAgents |
-|---|---:|---:|---:|---:|---:|---:|
-| Accuracy Pass Rate (Score >= 7) | 88.0% (22/25) | 84.0% (21/25) | 84.0% (42/50) | 86.0% (43/50) | 100.0% (50/50) | 86.0% (43/50) |
-| Mean Accuracy Score | 8.56 | 8.40 | 8.38 | 8.28 | 9.28 | 8.28 |
-| Mean Citation Score | 8.24 | 7.88 | 8.10 | 7.84 | 8.68 | 7.84 |
-| Mean Latency per Query | 2.39s | 45.95s | 2.54s | 50.26s | 2.54s | 50.26s |
+| Metric                          | Exp. 1 LangGraph | Exp. 1 DeepAgents | Exp. 2 LangGraph | Exp. 2 DeepAgents | Exp. 3 Optimized LangGraph | Exp. 3 DeepAgents |
+| ------------------------------- | ---------------: | ----------------: | ---------------: | ----------------: | -------------------------: | ----------------: |
+| Accuracy Pass Rate (Score >= 7) |    88.0% (22/25) |     84.0% (21/25) |    84.0% (42/50) |     86.0% (43/50) |             100.0% (50/50) |     86.0% (43/50) |
+| Mean Accuracy Score             |             8.56 |              8.40 |             8.38 |              8.28 |                       9.28 |              8.28 |
+| Mean Citation Score             |             8.24 |              7.88 |             8.10 |              7.84 |                       8.68 |              7.84 |
+| Mean Latency per Query          |            2.39s |            45.95s |            2.54s |            50.26s |                      2.54s |            50.26s |
 
 ### Experiment 2 Breakdown
 
 | Classification Band | Score Range | LangGraph Flow | DeepAgents Flow |
-|---|---:|---:|---:|
-| Passed | 7.0-10.0 | 42/50 (84.0%) | 43/50 (86.0%) |
-| Partially Passed | 4.0-6.0 | 7/50 (14.0%) | 4/50 (8.0%) |
-| Failed | 0.0-3.0 | 1/50 (2.0%) | 3/50 (6.0%) |
+| ------------------- | ----------: | -------------: | --------------: |
+| Passed              |    7.0-10.0 |  42/50 (84.0%) |   43/50 (86.0%) |
+| Partially Passed    |     4.0-6.0 |   7/50 (14.0%) |     4/50 (8.0%) |
+| Failed              |     0.0-3.0 |    1/50 (2.0%) |     3/50 (6.0%) |
 
 Experiment 2 showed that DeepAgents slightly improved pass count, but LangGraph
 was much faster and had stronger citation quality. DeepAgents latency was driven
@@ -151,16 +151,9 @@ predictable execution.
 
 ### Optimization Notes
 
-The optimized LangGraph run in Experiment 3 reached a 100.0% pass rate on the
-50-question benchmark. The main improvements were stricter answer-completeness
-instructions, stronger entity grounding, better handling of context spread
-across chunk boundaries, and a larger retrieved context window with optional
-Jina reranking.
+The optimized LangGraph run in Experiment 3 reached a 100.0% pass rate on the 50-question benchmark. The main improvements were stricter answer-completeness instructions, stronger entity grounding, better handling of context spread across chunk boundaries, and a larger retrieved context window with optional Jina reranking.
 
-Based on these experiments, LangGraph is the recommended default flow for this
-repo because it provides the best balance of accuracy, citation quality, and
-latency. DeepAgents remains included to demonstrate multi-agent decomposition
-over the same RAG backend.
+Based on these experiments, LangGraph is the recommended default workflow for this project because it provides the best balance of accuracy, citation quality, and latency. The low latency of LangGraph (approximately 2.5 s/query) enabled rapid prompt iteration and retrieval tuning, allowing optimization efforts to be prioritized within the available project timeline and compute budget. While the DeepAgents workflow could likely achieve comparable accuracy through similar prompt engineering and retrieval optimizations, those experiments were not pursued due to its substantially higher latency (approximately 50 s/query, around 20× slower than LangGraph). The significantly longer execution time made iterative optimization considerably more time- and cost-intensive, so the available effort was focused on optimizing the LangGraph pipeline. Consequently, DeepAgents is included to demonstrate a multi-agent decomposition architecture over the same RAG backend, while LangGraph represents the fully optimized, production-recommended workflow.
 
 ## Repository Structure
 
