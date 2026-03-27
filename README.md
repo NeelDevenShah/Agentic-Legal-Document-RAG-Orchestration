@@ -5,6 +5,8 @@ LangGraph, and DeepAgents. The application indexes user-uploaded PDFs, retrieves
 grounded evidence with hybrid search, and can answer questions through either a
 LangGraph flow, a DeepAgents flow, or both side by side in the Gradio UI.
 
+This directly maps to the assignment brief, which asked for a multi-agent RAG workflow built with LangChain, LangGraph, and DeepAgents over the provided document set, using an appropriate chunking method and a rate-limited LLM provider, packaged as a runnable, documented repository with a Dockerfile. Beyond that minimum scope, this implementation also adds a hybrid dense-plus-lexical retrieval backend with optional neural reranking, a side-by-side comparison of both orchestration flows inside a single Gradio interface, and a three-run benchmark used to justify which flow is recommended for production.
+
 ## Agent Roles
 
 ### LangGraph Answer Agent
@@ -87,6 +89,10 @@ strategy with:
 Each chunk keeps page/source metadata and adds chunk-level flags such as
 `chunk_index`, `is_header`, `is_legal_clause`, and `chunk_size`.
 
+A fixed-size or purely token-based splitter — cutting every N tokens regardless of content — doesn't work well on this corpus. Legal filings pack citations, defined terms, and multi-page holdings into long unbroken paragraphs, so a hard token cutoff routinely splits a WHEREAS clause, a numbered holding, or a statutory citation in half. When that happens, retrieval can return one half of an obligation without the clause that qualifies it, and the answering model grounds on incomplete or misleading context. A fixed window also can't distinguish a genuine structural boundary (a new section, a new clause) from the middle of an argument — both look identical as raw token counts.
+
+I started with a plain fixed-length/token-based splitter as a first pass, but the issues above showed up quickly in testing — chunks cutting off mid-clause, holdings split across boundaries — so I switched to a recursive, legal-aware splitter that avoids this by attempting the most meaningful boundary first — a major section break — and only falling back through legal headings, clause markers, numbered sections, paragraphs, and sentences, down to a raw character split, if none of those boundaries fit within the configured chunk size (1,200 characters, with a 180-character overlap). This keeps most chunks aligned to a complete clause, holding, or numbered paragraph rather than an arbitrary cut point, which is why it outperforms plain fixed-length or token-based chunking on legal text.
+
 ### Retrieval
 
 `rag_pipeline/utilities/retrieval.py` builds a shared `CorpusIndex`:
@@ -112,7 +118,14 @@ self-contained and content-focused. The final test cases avoid meta-questions
 such as "according to this chunk" and instead ask about concrete legal issues,
 parties, statutes, facts, holdings, and allegations from the provided corpus.
 
-The benchmark compared LangGraph and DeepAgents on the same retrieval backend.
+Three benchmark runs were used to build confidence incrementally before scaling up:
+
+Experiment 1 ran both flows over an initial 25-question test set — 25 self-contained legal questions generated from corpus chunks — to sanity-check that both orchestration paths could answer correctly and cite sources.
+Experiment 2 expanded the test set to 50 questions (the original 25 plus 25 new, non-overlapping questions) and re-ran both flows on the original 25 as part of this set to check for run-to-run retrieval deviation. Retrieval results were identical across runs, confirming the retrieval backend is deterministic and not a source of noise in the benchmark.
+Experiment 3 optimized the LangGraph prompt and retrieval settings (see Optimization Notes) and re-ran only the questions LangGraph had failed in Experiment 2; all of them passed after optimization. To rule out regressions, 10 questions LangGraph had already passed in Experiment 2 were also re-run under the optimized configuration — all 10 still passed, confirming the changes fixed the failing cases without breaking previously correct answers. DeepAgents figures for Experiment 3 are carried over unchanged from Experiment 2, since only the LangGraph flow was re-evaluated in this run.
+
+Each answer was scored by an LLM judge on a 0–10 accuracy scale (does it match the expected answer and source text) and a 0–10 citation scale (does it properly attribute evidence to source/page/chunk metadata). A question "passes" if its accuracy score is 7 or higher — the "22/25", "42/50", etc. in the table are the count of questions passed out of the total in that run.
+
 Saved experiment outputs are kept under `experiments/` and should be treated as
 historical results; rerunning them may produce slightly different values because
 LLM APIs, latency, and rate limits vary over time.
