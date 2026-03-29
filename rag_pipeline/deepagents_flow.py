@@ -4,13 +4,12 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from deepagents import create_deep_agent
 
-from .prompts import (
+from rag_pipeline.prompts import (
     DEEPAGENTS_SYSTEM_PROMPT,
     RESEARCH_SUBAGENT_PROMPT,
     SYNTHESIS_SUBAGENT_PROMPT,
 )
-from .retrieval import CorpusIndex, format_search_hits
-from .utils import extract_final_ai_text, retry_with_backoff
+from rag_pipeline.utilities import CorpusIndex, extract_final_ai_text, format_search_hits, retry_with_backoff
 
 
 def build_search_tool(index: CorpusIndex):
@@ -49,7 +48,7 @@ def build_deepagents_graph(
 
     return create_deep_agent(
         model=model,
-        tools=[search_tool],
+        tools=[],
         system_prompt=DEEPAGENTS_SYSTEM_PROMPT,
         subagents=subagents,
     )
@@ -63,15 +62,15 @@ def run_deepagents_rag(
     retry_attempts: int,
 ) -> str:
     agent = build_deepagents_graph(index=index, model=model)
-    result = retry_with_backoff(
-        lambda: agent.invoke(
+
+    def _invoke():
+        result = agent.invoke(
             {"messages": [HumanMessage(content=question)]},
             config={"recursion_limit": 25},
-        ),
-        attempts=retry_attempts,
-        label="DeepAgents orchestration",
-    )
-    answer = extract_final_ai_text(result)
-    if answer:
+        )
+        answer = extract_final_ai_text(result) or extract_final_ai_text({"messages": result.get("messages", [])})
+        if any(marker in answer.lower() for marker in ("rate limit", "429", "too many requests", "tokens per min")):
+            raise RuntimeError(f"Rate limit hit in DeepAgents output: {answer}")
         return answer
-    return extract_final_ai_text({"messages": result.get("messages", [])})
+
+    return retry_with_backoff(_invoke, attempts=max(retry_attempts, 6), label="DeepAgents orchestration")

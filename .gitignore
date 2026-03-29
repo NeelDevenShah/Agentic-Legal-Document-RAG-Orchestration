@@ -1,5 +1,11 @@
 .env
+__pycache__/
+.qdrant/
 *.pdf
 *.pyc
 .venv
 *.egg-info
+*.csv
+*.sqlite
+*.json
+*.zip
